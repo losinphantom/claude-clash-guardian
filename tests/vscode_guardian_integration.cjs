@@ -3,7 +3,7 @@ const fs=require('node:fs'),path=require('node:path'),https=require('node:https'
 const {spawn,spawnSync}=require('node:child_process');
 const assert=require('node:assert/strict');
 const root=fs.mkdtempSync(path.join(require('./runtime.cjs').scratch,'vscode-integration-')),extensions=path.join(root,'extensions'),userData=path.join(root,'user');
-const guardianPath=path.join(extensions,'jupiter-local.claude-clash-guardian-0.1.1');
+const guardianPath=path.join(extensions,'jupiter-local.claude-clash-guardian-0.2.0');
 const targetPath=path.join(extensions,'anthropic.claude-code-fixture');
 const probePath=path.join(extensions,'jupiter-local.guardian-probe-0.1.0');
 const phaseFile=path.join(root,'phase.json'),resultFile=path.join(root,'result.json'),stateFile=path.join(root,'state.json'),eventsFile=path.join(root,'events.jsonl');
@@ -19,6 +19,7 @@ fs.writeFileSync(path.join(userData,'User','settings.json'),JSON.stringify({
   'extensions.allowed':{'*':true,'anthropic.claude-code':false,'jupiter-local.claude-clash-guardian':true},
   'extensions.autoUpdate':false,'extensions.autoCheckUpdates':false,'update.mode':'none','telemetry.telemetryLevel':'off',
   'http.proxySupport':process.env.GUARD_TEST_PROXY_SUPPORT || 'override','workbench.startupEditor':'none','security.workspace.trust.enabled':false
+  ,'claudeClashGuardian.privacy.mode':'manual','claudeClashGuardian.privacy.timeZone':'Asia/Tokyo','claudeClashGuardian.privacy.locale':'ja-JP'
 },null,2));
 const requests=[];
 const tlsServer=https.createServer({key:fs.readFileSync(path.join(require('./runtime.cjs').scratch,'test-key.pem')),cert:fs.readFileSync(path.join(require('./runtime.cjs').scratch,'test-cert.pem'))},(req,res)=>{
@@ -45,7 +46,7 @@ let code;
   const literals={phaseFile,resultFile,stateFile,eventsFile,port:proxy.address().port,url:'https://unit-anthropic.test:'+tlsServer.address().port,cert:path.join(require('./runtime.cjs').scratch,'test-cert.pem')};
   writePackage(targetPath,{name:'claude-code',publisher:'anthropic',displayName:'LOCAL TEST ONLY Claude',version:'0.0.1',engines:{vscode:'^1.96.0'},main:'./extension.js',activationEvents:['*'],contributes:{configuration:{properties:{'claudeCode.claudeProcessWrapper':{type:'string',scope:'machine'},'claudeCode.environmentVariables':{type:'array',scope:'machine',default:[]}}}}},`
 const vscode=require('vscode'),https=require('https'),fs=require('fs');const cfg=${JSON.stringify(literals)};let interval;
-exports.activate=()=>{fs.appendFileSync(cfg.eventsFile,JSON.stringify({kind:'activated',time:Date.now(),pid:process.pid})+'\\n');function send(){try{const req=https.get(cfg.url+'/api/oauth/profile',{ca:fs.readFileSync(cfg.cert),headers:{Authorization:'Bearer FAKE_INTEGRATION_TOKEN'}},res=>res.resume());req.on('error',()=>{});}catch{}}send();interval=setInterval(send,100);};exports.deactivate=()=>clearInterval(interval);
+exports.activate=()=>{const os=require('os'),p=Intl.DateTimeFormat().resolvedOptions();if(p.timeZone!=='Asia/Tokyo'||p.locale!=='ja-JP'||os.hostname()!=='claude-device'||vscode.env.language!=='ja-JP')throw Error('Host privacy profile was not applied before activation');fs.appendFileSync(cfg.eventsFile,JSON.stringify({kind:'activated',time:Date.now(),pid:process.pid,hostPrivacy:true})+'\\n');function send(){try{const req=https.get(cfg.url+'/api/oauth/profile',{ca:fs.readFileSync(cfg.cert),headers:{Authorization:'Bearer FAKE_INTEGRATION_TOKEN'}},res=>res.resume());req.on('error',()=>{});}catch{}}send();interval=setInterval(send,100);};exports.deactivate=()=>clearInterval(interval);
 `);
   writePackage(probePath,{name:'guardian-probe',publisher:'jupiter-local',displayName:'Guardian isolated integration probe',version:'0.1.0',engines:{vscode:'^1.96.0'},main:'./extension.js',activationEvents:['*']},`
 const vscode=require('vscode'),fs=require('fs');const cfg=${JSON.stringify(literals)};const delay=ms=>new Promise(r=>setTimeout(r,ms));function write(file,value){const tmp=file+'.tmp';fs.writeFileSync(tmp,JSON.stringify(value));fs.renameSync(tmp,file);}function requests(){if(!fs.existsSync(cfg.eventsFile))return 0;return fs.readFileSync(cfg.eventsFile,'utf8').trim().split('\\n').filter(Boolean).map(JSON.parse).filter(e=>e.kind==='request').length;}async function until(fn){for(let i=0;i<80;i++){if(fn())return;await delay(100);}throw Error('Condition timed out.');}

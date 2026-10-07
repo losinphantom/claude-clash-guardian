@@ -13,4 +13,17 @@ foreach($taskLink in $taskLinks) {
 $taskUserPath=[Environment]::GetEnvironmentVariable('Path','User')
 $taskNextPath=($taskUserPath -split ';' | Where-Object { $_.TrimEnd('\') -ne $taskInstall.TrimEnd('\') }) -join ';'
 [Environment]::SetEnvironmentVariable('Path',$taskNextPath,'User')
+# Remove active launch entry points so terminals with a stale PATH cannot lock
+# Claude again after the guardian itself has been uninstalled. Keep backups.
+$taskResolvedInstall=[IO.Path]::GetFullPath($taskInstall)
+foreach($taskName in @('code.cmd','CodeClashLauncher.exe','launcher.cjs')) {
+    $taskTarget=[IO.Path]::GetFullPath((Join-Path $taskResolvedInstall $taskName))
+    if([IO.Path]::GetDirectoryName($taskTarget) -ne $taskResolvedInstall){throw 'Unexpected launcher cleanup path.'}
+    if(Test-Path -LiteralPath $taskTarget){Remove-Item -LiteralPath $taskTarget -Force}
+}
+if(-not('ClaudeGuardianUndoBroadcast' -as [type])) {
+    Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class ClaudeGuardianUndoBroadcast{[DllImport("user32.dll",CharSet=CharSet.Unicode)]public static extern IntPtr SendMessageTimeout(IntPtr h,uint m,IntPtr w,string l,uint f,uint t,out IntPtr r);}'
+}
+$taskBroadcastResult=[IntPtr]::Zero
+[ClaudeGuardianUndoBroadcast]::SendMessageTimeout([IntPtr]0xffff,0x1a,[IntPtr]::Zero,'Environment',2,1000,[ref]$taskBroadcastResult) | Out-Null
 Write-Output 'Guardian removed. Fully exit VS Code and reopen; reopen terminals for the restored PATH.'

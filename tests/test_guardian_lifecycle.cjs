@@ -4,14 +4,14 @@ const path=require('node:path');
 const root=path.join(require('./runtime.cjs').root,'extension');
 const network=require(path.join(root,'network-guard.cjs'));
 const policy=require(path.join(root,'policy.cjs'));
-const events=[], settings={extensions:{allowed:{'*':true,[policy.TARGET]:false}},claudeCode:{environmentVariables:[]}};
+const events=[], settings={extensions:{allowed:{'*':true,[policy.TARGET]:false}},claudeCode:{environmentVariables:[]},claudeClashGuardian:{'privacy.mode':'manual'}};
 let allowed=true, active=false;
 const guard=network.createNetworkGuard({stateProvider:()=>({allowed,port:7890})});
 const originalLoad=Module._load, originalFetch=globalThis.fetch, originalSocket=globalThis.WebSocket;
-const context={subscriptions:[]};
+const state=new Map(),context={subscriptions:[],globalState:{get:key=>state.get(key),async update(key,value){state.set(key,value);}}};
 const vscode={
   ConfigurationTarget:{Global:1},StatusBarAlignment:{Right:2},
-  workspace:{getConfiguration(section){return{get(key,fallback){return settings[section][key]??fallback;},async update(key,value){events.push(section+'.'+key+':'+JSON.stringify(value));settings[section][key]=value;if(section==='extensions'&&key==='allowed')active=!!value[policy.TARGET];}};}},
+  workspace:{onDidChangeConfiguration(){return{dispose(){}};},getConfiguration(section){return{get(key,fallback){return settings[section][key]??fallback;},async update(key,value){events.push(section+'.'+key+':'+JSON.stringify(value));settings[section][key]=value;if(section==='extensions'&&key==='allowed')active=!!value[policy.TARGET];}};}},
   extensions:{getExtension(){return{get isActive(){return active;},packageJSON:{main:'./extension.js',contributes:{configuration:{properties:{'claudeCode.claudeProcessWrapper':{}}}}}};}},
   window:{createOutputChannel(){return{appendLine(){},dispose(){}};},createStatusBarItem(){return{show(){},dispose(){}};},showInformationMessage(){return Promise.resolve();}},
   commands:{registerCommand(){return{dispose(){}};},async executeCommand(command){events.push(command);}}
@@ -31,6 +31,9 @@ const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const wrapperIndex=events.findIndex(value=>value.startsWith('claudeCode.claudeProcessWrapper:'));
   const enableIndex=events.findIndex(value=>value.startsWith('extensions.allowed:')&&value.includes('"anthropic.claude-code":true'));
   assert.ok(wrapperIndex>=0 && wrapperIndex<enableIndex);
+  const privacyEntry=settings.claudeCode.environmentVariables.find(entry=>entry.name==='CLAUDE_GUARD_PRIVACY_JSON');
+  assert.equal(JSON.parse(privacyEntry.value).locale,'en-US');
+  assert.ok(events.findIndex(value=>value.startsWith('claudeCode.environmentVariables:'))<enableIndex);
   console.log('PASS: companion installs backend gate before enabling the original plugin.');
   allowed=false;await delay(350);
   assert.equal(settings.extensions.allowed[policy.TARGET],false);

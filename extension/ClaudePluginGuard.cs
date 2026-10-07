@@ -70,6 +70,23 @@ internal static class ClaudePluginGuard
                 start.EnvironmentVariables["HTTP_PROXY"] = proxy;
                 start.EnvironmentVariables["NO_PROXY"] = "localhost,127.0.0.1,::1";
                 start.EnvironmentVariables["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1";
+                start.EnvironmentVariables["DISABLE_TELEMETRY"] = "1";
+                start.EnvironmentVariables["DISABLE_ERROR_REPORTING"] = "1";
+                string privacy = Environment.GetEnvironmentVariable("CLAUDE_GUARD_PRIVACY_JSON");
+                if (!string.IsNullOrEmpty(privacy))
+                {
+                    string preload = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "backend-privacy.cjs");
+                    if (!File.Exists(preload)) return Fail("Privacy preload is missing. Claude was not started.");
+                    string preloadArgument = PreloadArgument(preload);
+                    if (preloadArgument == null) return Fail("Privacy preload path cannot be passed to this Bun runtime. Claude was not started.");
+                    string extra = "--preload=" + preloadArgument;
+                    start.EnvironmentVariables["BUN_OPTIONS"] = (start.EnvironmentVariables["BUN_OPTIONS"] ?? "") + " " + extra;
+                    start.EnvironmentVariables.Remove("BUN_BE_BUN");
+                    // Verify that this installed Bun executable runs our preload
+                    // before its entry point. The probe exits before Claude starts.
+                    if (!PrivacyProbe(start)) return Fail("Claude privacy preload is unsupported or failed validation. Claude was not started.");
+                    if (!IsAllowed() || ReadPort() != port) return Fail("Clash changed while validating privacy. Claude was not started.");
+                }
                 using (Process child = Process.Start(start))
                 {
                     if (child == null) return Fail("Cannot launch Claude.");
@@ -112,6 +129,37 @@ internal static class ClaudePluginGuard
         }
         catch (IOException) { }
         catch (ObjectDisposedException) { }
+    }
+    static bool PrivacyProbe(ProcessStartInfo prepared)
+    {
+        try
+        {
+            ProcessStartInfo probe = new ProcessStartInfo(prepared.FileName, "--version");
+            probe.UseShellExecute=false;probe.CreateNoWindow=true;probe.RedirectStandardOutput=true;probe.RedirectStandardError=true;
+            probe.EnvironmentVariables.Clear();
+            foreach (string key in prepared.EnvironmentVariables.Keys) probe.EnvironmentVariables[key]=prepared.EnvironmentVariables[key];
+            probe.EnvironmentVariables["CLAUDE_GUARD_PRIVACY_PROBE"]="1";
+            using (Process child=Process.Start(probe))
+            {
+                Task<string> output=child.StandardOutput.ReadToEndAsync(),error=child.StandardError.ReadToEndAsync();
+                if (!child.WaitForExit(5000)) {child.Kill();return false;}
+                return child.ExitCode==0 && output.Result.Trim()=="CLAUDE_GUARD_PRIVACY_READY";
+            }
+        }
+        catch {return false;}
+    }
+    static string PreloadArgument(string path)
+    {
+        // This Bun version treats quotes in BUN_OPTIONS as literal characters.
+        // Prefer the existing file's Windows short path if whitespace is present.
+        if (path.Any(char.IsWhiteSpace))
+        {
+            StringBuilder buffer=new StringBuilder(32768);
+            uint length=GetShortPathName(path,buffer,(uint)buffer.Capacity);
+            if (length==0 || length>=buffer.Capacity || buffer.ToString().Any(char.IsWhiteSpace)) return null;
+            path=buffer.ToString();
+        }
+        return path.Replace('\\','/');
     }
     internal static bool YamlTrue(string text, string key)
     {
@@ -216,4 +264,5 @@ internal static class ClaudePluginGuard
     [DllImport("kernel32.dll", SetLastError=true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
     [DllImport("kernel32.dll", SetLastError=true)] static extern bool TerminateJobObject(IntPtr job, uint exitCode);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern uint GetShortPathName(string longPath,StringBuilder shortPath,uint capacity);
 }

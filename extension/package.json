@@ -2,7 +2,7 @@
   "name": "claude-clash-guardian",
   "displayName": "Claude Clash Guardian",
   "description": "保护官方 Claude Code 插件：检查 Clash 开关、控制启停并强制插件宿主请求走本地代理。",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "publisher": "jupiter-local",
   "license": "MIT",
   "engines": {"vscode": "^1.96.0"},
@@ -13,7 +13,18 @@
   "contributes": {
     "commands": [
       {"command": "claudeClashGuardian.status", "title": "Claude 保护：查看状态"},
-      {"command": "claudeClashGuardian.checkNow", "title": "Claude 保护：重新检查 Clash"}
-    ]
+      {"command": "claudeClashGuardian.checkNow", "title": "Claude 保护：重新检查 Clash"},
+      {"command": "claudeClashGuardian.refreshPrivacy", "title": "Claude 保护：重新识别出口区域并重载窗口"}
+    ],
+    "configuration": {
+      "title": "Claude Clash Guardian",
+      "properties": {
+        "claudeClashGuardian.privacy.enabled": {"type":"boolean","default":true,"scope":"application","description":"规范化 Claude 插件和后端的时区、默认区域语言及部分设备元数据。修改后重载窗口；不保证匿名或防封。"},
+        "claudeClashGuardian.privacy.mode": {"type":"string","enum":["auto","manual"],"default":"auto","scope":"application","description":"自动通过 Clash 的 claude.ai 路由识别出口国家，并使用国家默认时区和语言；失败时用手动值。切换代理节点后请执行重新识别命令。"},
+        "claudeClashGuardian.privacy.timeZone": {"type":"string","default":"Etc/UTC","scope":"application","description":"手动模式及自动失败时的 IANA 时区，如 America/New_York 或 Asia/Tokyo。"},
+        "claudeClashGuardian.privacy.locale": {"type":"string","default":"en-US","scope":"application","description":"手动模式及自动失败时的区域语言，如 en-US 或 ja-JP。不强制改变回复语言。"},
+        "claudeClashGuardian.privacy.maskDeviceInfo": {"type":"boolean","default":true,"scope":"application","description":"替换受保护 JS API 的主机名、CPU 型号及 VS Code machineId。保留真实系统和架构以避免运行错误；不屏蔽原生命令、文件路径或账户身份。"}
+      }
+    }
   }
 }

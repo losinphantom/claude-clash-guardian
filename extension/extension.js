@@ -6,7 +6,32 @@ const {createNetworkGuard}=require('./network-guard.cjs');
 const {installNetworkScope}=require('./network-scope.cjs');
 const {TARGET,nextPolicy}=require('./policy.cjs');
 const jsonc=require('./node_modules/jsonc-parser');
+const crypto=require('node:crypto');
+const {manualProfile,resolveProfile}=require('./privacy-profile.cjs');
 let guard, timer, disposed=false, queue=Promise.resolve(), lastAllowed, output, status, scope;
+let privacy={enabled:false},privacyConfig,privacySeed,activationContext;
+function readPrivacyConfig() {
+  const config=vscode.workspace.getConfiguration('claudeClashGuardian');
+  return {enabled:config.get('privacy.enabled',true),mode:config.get('privacy.mode','auto'),timeZone:config.get('privacy.timeZone','Etc/UTC'),locale:config.get('privacy.locale','en-US'),maskDeviceInfo:config.get('privacy.maskDeviceInfo',true)};
+}
+async function configurePrivacy() {
+  const next=await resolveProfile(privacyConfig,privacySeed,guard);
+  const changed=['enabled','timeZone','locale','maskDeviceInfo','machineId'].some(key=>privacy[key]!==next[key]);
+  if(changed&&vscode.extensions.getExtension(TARGET)?.isActive){await reloadForPrivacy();return;}
+  privacy=next;
+  const config=vscode.workspace.getConfiguration('claudeCode');
+  const managed=new Set(['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC','DISABLE_TELEMETRY','DISABLE_ERROR_REPORTING','CLAUDE_GUARD_PRIVACY_JSON']);
+  const entries=config.get('environmentVariables',[]).filter(entry=>!managed.has(String(entry.name).toUpperCase()));
+  for(const name of ['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC','DISABLE_TELEMETRY','DISABLE_ERROR_REPORTING'])entries.push({name,value:'1'});
+  if(privacy.enabled)entries.push({name:'CLAUDE_GUARD_PRIVACY_JSON',value:JSON.stringify(privacy)});
+  await updateClaudeSetting(activationContext,'environmentVariables',entries);
+  output.appendLine(privacy.enabled?'隐私模式：'+privacy.source+'；'+privacy.timeZone+'；'+privacy.locale+(privacy.country?'；国家 '+privacy.country:'')+(privacy.reason?'；'+privacy.reason:''):'隐私模式已关闭。');
+}
+async function reloadForPrivacy() {
+  disposed=true;clearInterval(timer);guard?.dispose();
+  await setPolicy(false);
+  await vscode.commands.executeCommand('workbench.action.reloadWindow');
+}
 async function updateClaudeSetting(context,key,value) {
   const config=vscode.workspace.getConfiguration('claudeCode');
   if(JSON.stringify(config.get(key))===JSON.stringify(value))return;
@@ -64,6 +89,10 @@ async function synchronize(allowed,initial=false) {
     output.appendLine('当前 Claude 插件的入口格式或后端包装设置不受支持，保持禁用。');
   }
   if(!initial && allowed===lastAllowed)return;
+  // Resolve the route and set backend privacy before allowing any activation.
+  if(allowed)await configurePrivacy();
+  if(disposed)return;
+  allowed=allowed&&guard.status().allowed;
   lastAllowed=allowed;
   await setPolicy(allowed);
   paint(allowed);
@@ -84,24 +113,30 @@ function schedule(initial=false) {
 exports.activate=async function activate(context) {
   if(process.platform!=='win32')throw new Error('本地 Clash 保护目前只支持 Windows。');
   disposed=false;lastAllowed=undefined;
+  activationContext=context;privacyConfig=readPrivacyConfig();
+  privacySeed=context.globalState.get('privacySeed');
+  if(!privacySeed){privacySeed=crypto.randomBytes(32).toString('hex');await context.globalState.update('privacySeed',privacySeed);}
+  privacy=manualProfile(privacyConfig,privacySeed);
   output=vscode.window.createOutputChannel('Claude Clash Guardian');
   status=vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right,90);
   status.command='claudeClashGuardian.status';paint(false);status.show();
   context.subscriptions.push(output,status);
-  guard=createNetworkGuard({installDir:__dirname});
-  scope=installNetworkScope(guard);
+  guard=createNetworkGuard({installDir:__dirname,getProfile:()=>privacy});
+  scope=installNetworkScope(guard,()=>privacy);
   // Install hooks and backend gate before lifting the initial allow-list block.
   const claude=vscode.workspace.getConfiguration('claudeCode');
   const wrapper=path.join(__dirname,'ClaudePluginGuard.exe');
   if(claude.get('claudeProcessWrapper')!==wrapper)await updateClaudeSetting(context,'claudeProcessWrapper',wrapper);
-  const entries=claude.get('environmentVariables',[]),filtered=entries.filter(entry=>String(entry.name).toUpperCase()!=='CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC');
-  filtered.push({name:'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',value:'1'});
-  if(JSON.stringify(entries)!==JSON.stringify(filtered))await updateClaudeSetting(context,'environmentVariables',filtered);
+  await configurePrivacy();
   context.subscriptions.push(vscode.commands.registerCommand('claudeClashGuardian.status',()=>{
     const current=guard.status();
-    return vscode.window.showInformationMessage((current.allowed?'Clash 已开启':'Clash 未开启或无法确认')+'；本地代理端口 '+current.port+'。Claude 许可：'+(lastAllowed?'允许':'锁定')+'。');
+    return vscode.window.showInformationMessage((current.allowed?'Clash 已开启':'Clash 未开启或无法确认')+'；本地代理端口 '+current.port+'。Claude 许可：'+(lastAllowed?'允许':'锁定')+'。隐私：'+(privacy.enabled?privacy.source+' / '+privacy.timeZone+' / '+privacy.locale:'关闭')+(privacy.reason?'；'+privacy.reason:'')+'。');
   }));
   context.subscriptions.push(vscode.commands.registerCommand('claudeClashGuardian.checkNow',()=>schedule(true)));
+  context.subscriptions.push(vscode.commands.registerCommand('claudeClashGuardian.refreshPrivacy',()=>reloadForPrivacy()));
+  context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event=>{
+    if(event.affectsConfiguration('claudeClashGuardian.privacy'))queue=queue.then(()=>reloadForPrivacy()).catch(error=>output.appendLine('隐私配置重载失败：'+error.message));
+  }));
   await guard.ready();
   await schedule(true);
   timer=setInterval(()=>schedule(),100);timer.unref();

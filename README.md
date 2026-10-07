@@ -1,6 +1,6 @@
 # Claude Clash Guardian
 
-用于 Windows / Clash Verge 的独立保护插件：`jupiter-local.claude-clash-guardian`，版本 **0.1.1**。
+用于 Windows / Clash Verge 的独立保护插件：`jupiter-local.claude-clash-guardian`，版本 **0.2.0**。
 
 保护插件不修改官方插件安装包，不给它指定版本，也不修改独立 Claude Code CLI 的配置。
 
@@ -41,6 +41,36 @@ Clash 开启时，官方插件可按正常的更新机制更新；关闭时它�
 
 官方机制说明：[允许或禁用扩展](https://code.visualstudio.com/docs/enterprise/extensions)。
 
+## 隐私模式（0.2.0）
+
+默认开启，支持自动和手动模式。它减少部分本机元数据暴露，不保证匿名、不保证防封，也不改变账户身份或登录凭据。
+
+- 自动模式：在 Clash 状态确认后，通过同一个本地 CONNECT 代理请求 `https://claude.ai/cdn-cgi/trace`，按响应的 `loc` 出口国家选用约定的默认时区和语言。请求不带登录令牌或 Cookie；不保存或记录返回的出口 IP。它仍是一次向真实网站发送的请求，网站能看到出口 IP。
+- 自动失败、网站拒绝访问或国家不在映射表中时，使用手动兜底值，默认 UTC / en-US；状态命令显示来源及失败状态。关闭 Clash 时不探测。
+- 手动模式：完全使用设置中的 IANA 时区和区域语言。例：`Asia/Tokyo` / `ja-JP`。不会强制改变你与 Claude 对话的语言。
+- 国家不等于城市：美国默认纽约、加拿大多伦多、澳大利亚悉尼。可在 `extension/privacy-profile.cjs` 查看映射；需要其他城市时使用手动模式。
+- 切换代理节点或修改分流规则后，执行“Claude 保护：重新识别出口区域并重载窗口”。自动识别也会在再次允许 Claude 时运行。这里识别的是 `claude.ai` 路由；`api.anthropic.com` 等其他域名可能被 Clash 分到不同出口。
+
+VS Code 设置示例（修改后保护插件会锁定 Claude 并重载窗口）：
+
+```json
+{
+  "claudeClashGuardian.privacy.enabled": true,
+  "claudeClashGuardian.privacy.mode": "manual",
+  "claudeClashGuardian.privacy.timeZone": "Asia/Tokyo",
+  "claudeClashGuardian.privacy.locale": "ja-JP",
+  "claudeClashGuardian.privacy.maskDeviceInfo": true
+}
+```
+
+实现范围：Claude 扩展宿主和随附 Bun 后端的常用 `Date` / `Intl` API 使用选定时区、默认区域语言；JS `os.hostname()` 和 CPU 型号使用通用值；扩展宿主的 VS Code `machineId` 使用保存在保护插件本地状态中的稳定替代标识。UTC 时间戳保持原值，明确传入的区域语言和时区继续生效。其他扩展的对应 API 保持原样。
+
+后端通过 Bun 的 `BUN_OPTIONS --preload` 加载保护插件自带脚本，先以无登录探针验证该入口生效再启动 Claude；不修改官方安装包。探针失败时拒绝启动。Bun 对带空格的预加载路径支持有限，帮助程序尝试 Windows 短路径；无法转换时保持阻止。
+
+限制：真实操作系统和架构继续用于功能判断；CPU 数量、内存、文件路径、账户标识、原生命令/原生库、子进程和独立 Webview 环境没有全部匿名化。软件标识替换不等于隐藏硬件序列号。后端自身的持久化 `userID` / `machineID` 不会被本功能更改；检查的 2.1.289 后端在正常 API 请求的 `metadata.user_id` 中构造 `device_id`（来自 `userID`）、`account_uuid` 和 `session_id`，关闭遥测不会移除这组正常请求身份。语言和时区规范化不能移除已在会话、设置或文件中写入的信息；显式时区/语言选项优先。不要把本功能作为操作系统隔离或账户封禁规避保证。
+
+插件和后端均关闭非必要流量、遥测和错误上报；正常模型请求仍然携带账户授权和任务上下文。测试使用假令牌及隔离配置；真实后端测试的预加载脚本在应用入口前退出，不运行登录会话。
+
 ## 撤销
 
 完全退出 VS Code，再在 PowerShell 执行：
@@ -71,6 +101,9 @@ python scripts/test.py --suite integration
 # 可选：指定本机未修改的官方 2.1.289 入口文件，验证其中的 Axios / WebSocket。
 $env:CLAUDE_EXTENSION_JS = '官方插件安装目录\extension.js'
 python scripts/test.py --suite network
+# 无登录测试真实 Bun 后端的预加载和元数据规范化。
+$env:CLAUDE_NATIVE_EXE = '官方插件安装目录\\resources\\native-binary\\claude.exe'
+python scripts/test.py --suite native
 ```
 
 如果 `node` 不在 PATH 中，传入 `--node 'Node.exe 的绝对路径'`。可选的官方包测试引用当前 2.1.289 的内部导出符号，升级后需要更新测试适配；这不限制运行时保护的官方插件版本。

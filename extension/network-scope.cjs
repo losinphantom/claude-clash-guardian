@@ -1,15 +1,17 @@
 'use strict';
 const Module=require('node:module');
 const ws=require('./node_modules/ws');
+const {installRuntimePrivacy}=require('./runtime-privacy.cjs');
 
 function targetFile(file) {
   return /[\\/]anthropic\.claude-code-[^\\/]+[\\/]/i.test(String(file || ''));
 }
 exports.targetFile=targetFile;
-exports.installNetworkScope=function installNetworkScope(guard) {
+exports.installNetworkScope=function installNetworkScope(guard,getProfile=()=>({enabled:false})) {
   const originalLoad=Module._load, originalFetch=globalThis.fetch, originalSocket=globalThis.WebSocket;
   const ScopedSocket=guard.makeWebSocket(ws);
   function callerIsTarget() {return targetFile(new Error().stack);}
+  const privacy=installRuntimePrivacy(getProfile,callerIsTarget);
   const loader=function(request,parent,isMain) {
     if(targetFile(parent?.filename)) {
       const original=id=>originalLoad.call(this,id,parent,isMain);
@@ -34,6 +36,7 @@ exports.installNetworkScope=function installNetworkScope(guard) {
   if(Socket) globalThis.WebSocket=Socket;
   return {
     uninstall() {
+      privacy.uninstall();
       if(Module._load===loader)Module._load=originalLoad;
       if(globalThis.fetch===fetcher)globalThis.fetch=originalFetch;
       if(Socket && globalThis.WebSocket===Socket)globalThis.WebSocket=originalSocket;

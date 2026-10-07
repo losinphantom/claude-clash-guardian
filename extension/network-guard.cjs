@@ -9,6 +9,7 @@ const tls = require('node:tls');
 const {spawn} = require('node:child_process');
 const {urlToHttpOptions} = require('node:url');
 const {Readable} = require('node:stream');
+const {scopedOs}=require('./runtime-privacy.cjs');
 
 exports.createNetworkGuard = function createNetworkGuard(options = {}) {
   const active = new Set();
@@ -156,6 +157,7 @@ exports.createNetworkGuard = function createNetworkGuard(options = {}) {
     const scoped=id=>{
       const name=id.replace(/^node:/,'');
       if(modules[name]) return modules[name];
+      if(name==='os'&&options.getProfile)return scopedOs(original(id),options.getProfile);
       if(name==='module') return Object.assign(Object.create(original(id)), {createRequire:(...args)=>scopedRequire(original(id).createRequire(...args))});
       if(name==='vscode') {
         if(scopedVSCode) return scopedVSCode;
@@ -164,7 +166,14 @@ exports.createNetworkGuard = function createNetworkGuard(options = {}) {
         scopedVSCode=Object.defineProperties({},descriptors);
         const envDescriptors=Object.getOwnPropertyDescriptors(real.env || {});
         delete envDescriptors.openExternal;
+        if(options.getProfile) {
+          delete envDescriptors.machineId;delete envDescriptors.language;
+        }
         const env=Object.defineProperties({},envDescriptors);
+        if(options.getProfile) {
+          Object.defineProperty(env,'machineId',{enumerable:true,get:()=>{const p=options.getProfile();return p?.enabled&&p.maskDeviceInfo?p.machineId:real.env.machineId;}});
+          Object.defineProperty(env,'language',{enumerable:true,get:()=>{const p=options.getProfile();return p?.enabled?p.locale:real.env.language;}});
+        }
         Object.defineProperty(env,'openExternal',{enumerable:true,value:async(uri,...args)=>{
           await initialized;
           const url=new URL(String(uri));
