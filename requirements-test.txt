@@ -1,0 +1,2 @@
+# Only the optional HTTPS / actual VS Code integration tests need this library.
+cryptography>=46,<51

@@ -1,0 +1,26 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),{spawnSync}=require('node:child_process');
+const source=require('./runtime.cjs').root;
+const fixture=fs.mkdtempSync(path.join(require('./runtime.cjs').scratch,'launcher-'));
+const user=path.join(fixture,'user'),install=path.join(fixture,'install');
+fs.mkdirSync(path.join(user,'User'),{recursive:true});fs.mkdirSync(install,{recursive:true});
+const settings=path.join(user,'User','settings.json');
+const text='\uFEFF{\n  // keep my comment\n  "editor.fontSize": 16,\n  "extensions.allowed": {"*": true, "anthropic.claude-code": true},\n}\n';
+fs.writeFileSync(settings,text);
+const exe=require('./runtime.cjs').codeExe();
+const result=spawnSync(exe,[path.join(source,'extension/launcher.cjs'),'--gate-dry-run','--user-data-dir',user,'--new-window'],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},encoding:'utf8',windowsHide:true});
+assert.equal(result.status,0,result.stderr);
+const jsonc=require(path.join(source,'extension/node_modules/jsonc-parser'));
+const updated=fs.readFileSync(settings,'utf8'),parsed=jsonc.parse(updated);
+assert.ok(updated.includes('// keep my comment'));assert.equal(parsed['editor.fontSize'],16);assert.equal(parsed['extensions.allowed']['anthropic.claude-code'],false);
+console.log('PASS: launcher locks before UI startup and preserves comments, trailing commas and unrelated settings.');
+fs.cpSync(path.join(source,'extension/node_modules/jsonc-parser'),path.join(install,'node_modules/jsonc-parser'),{recursive:true});
+fs.copyFileSync(path.join(source,'restore-launcher.cjs'),path.join(install,'restore-launcher.cjs'));
+fs.writeFileSync(path.join(install,'settings-before.json'),'\uFEFF'+JSON.stringify({'editor.fontSize':16}));
+// restore-launcher expects APPDATA/Code/User/settings.json.
+fs.mkdirSync(path.join(fixture,'appdata/Code/User'),{recursive:true});
+const restoreFile=path.join(fixture,'appdata/Code/User/settings.json');fs.writeFileSync(restoreFile,updated);
+const restored=spawnSync(exe,[path.join(install,'restore-launcher.cjs')],{env:{...process.env,APPDATA:path.join(fixture,'appdata'),ELECTRON_RUN_AS_NODE:'1'},encoding:'utf8',windowsHide:true});
+assert.equal(restored.status,0,restored.stderr);
+const after=jsonc.parse(fs.readFileSync(restoreFile,'utf8'));
+assert.equal(after['editor.fontSize'],16);assert.equal(after['extensions.allowed'],undefined);
+console.log('PASS: rollback restores managed permission entries while preserving unrelated preferences.');

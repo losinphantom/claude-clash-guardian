@@ -1,0 +1,19 @@
+{
+  "name": "claude-clash-guardian",
+  "displayName": "Claude Clash Guardian",
+  "description": "保护官方 Claude Code 插件：检查 Clash 开关、控制启停并强制插件宿主请求走本地代理。",
+  "version": "0.1.1",
+  "publisher": "jupiter-local",
+  "license": "MIT",
+  "engines": {"vscode": "^1.96.0"},
+  "categories": ["Other"],
+  "extensionKind": ["ui"],
+  "activationEvents": ["*"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {"command": "claudeClashGuardian.status", "title": "Claude 保护：查看状态"},
+      {"command": "claudeClashGuardian.checkNow", "title": "Claude 保护：重新检查 Clash"}
+    ]
+  }
+}

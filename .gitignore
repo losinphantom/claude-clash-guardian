@@ -1,0 +1,16 @@
+node_modules/
+*.exe
+*.vsix
+*.pem
+*.pfx
+*.log
+__pycache__/
+.venv/
+.test-work/
+verification.json
+settings-before.json
+shortcut-backups.json
+*.lnk
+.env
+.env.*
+*.credentials.json

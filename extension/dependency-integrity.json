@@ -1,0 +1,14 @@
+[
+  {
+    "package": "ws",
+    "version": "8.22.0",
+    "integrity": "sha512-Ydggc987+RO0AnWtZ/7Wq9FtNvcrL1b/RO0ud9mWjUPgDrsAAwQSF51sm2hm1XofbU/4jkpGEsLFsZZxU+1DOg==",
+    "source": "https://registry.npmjs.org/ws/-/ws-8.22.0.tgz"
+  },
+  {
+    "package": "jsonc-parser",
+    "version": "3.3.1",
+    "integrity": "sha512-HUgH65KyejrUFPvHFPbqOY0rsFip3Bo5wb4ngvdi1EpCYWUQDC5V+Y7mZws+DLkr4M//zQJoanu1SP+87Dv1oQ==",
+    "source": "https://registry.npmjs.org/jsonc-parser/-/jsonc-parser-3.3.1.tgz"
+  }
+]
